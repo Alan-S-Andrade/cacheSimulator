@@ -3,8 +3,8 @@ from mininet.topo import Topo
 class DynamicTopology(Topo):
     def __init__(self):
         super().__init__()
-        self.num_switch_layers = 2 # Number of switches
-        self.hosts_per_switch = 2 # Number of hosts per switch
+        self.num_switch_layers = 12 # Number of switches
+        self.hosts_per_switch = 8 # Number of hosts per switch
         self.server_ip = "10.0.0.254" # home server IP
         self.all_switches = []  # store all switches across layers
 

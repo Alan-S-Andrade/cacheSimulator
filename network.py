@@ -5,7 +5,8 @@ from mininet.link import TCLink
 from mininet.log import setLogLevel
 from mininet.cli import CLI
 import time
-import threading
+import random
+import multiprocessing as mp
 from topology import DynamicTopology
 
 def configure_cache(net):
@@ -29,16 +30,20 @@ def run_app_on_host(host):
     host.cmd("python3 cache_app.py")
 
 def run_cache_app(net):
-  threads = []
+  processes = []
+  read_probabilities = [0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+
   for host in net.hosts:
     if host.name != 'home':
-      thread = threading.Thread(target=host.cmd, args=("python3 cache_app.py",))
-      thread.start()
-      threads.append(thread)
+      for read_probability in read_probabilities:
+        cmd = f"python3 cache_app.py {read_probability}"
+        process = mp.Process(target=host.cmd, args=(cmd,))
+        process.start()
+        processes.append(process)
 
-  # Wait for threads to finish
-  for thread in threads:
-    thread.join()
+  # Wait for all processes to finish
+  for process in processes:
+      process.join()
 
 def set_bandwidth(net, bw):
   print(f"Setting bandwidth to {bw} Mbps")
@@ -80,25 +85,23 @@ def run():
   # Install and configure Redis on hosts
   configure_cache(net)
 
+  start_time = time.time()
   # run app on every node 
-  while True:
-    # bw = random.uniform(0.1, 10)  # random bandwidth between 1 and 10 Mbps
-    # set_bandwidth(net, bw)
-    # pl = random.randint(0, 20) # pkt loss percentage
-    # set_packet_loss(net, pl) 
-    # dt = random.randint(0, 10) # delay time 1 - 10ms
-    # set_packet_delay(net, dt)
-    # layers_removed = random.randint(2, len(net.switches))
-    # remove_hops(topo, layers_removed) # remove layers # update active switches
+  while time.time() - start_time < 60:  # Run for one minute
+    bw = random.uniform(0.1, 10)  # random bandwidth between 1 and 10 Mbps
+    set_bandwidth(net, bw)
+    pl = random.randint(0, 20) # pkt loss percentage
+    set_packet_loss(net, pl) 
+    dt = random.randint(0, 10) # delay time 1 - 10ms
+    set_packet_delay(net, dt)
+    layers_removed = random.randint(2, len(net.switches))
+    remove_hops(topo, layers_removed) # remove layers # update active switches
     
     # run app on all nodes
     run_cache_app(net)
-    # time.sleep(10) 
+    time.sleep(10) 
 
-    # add_hops(topo, net, layers_removed) # re-enalbe switches
-
-  # cli to interact with the network
-  CLI(net)
+    add_hops(topo, net, layers_removed) # re-enalbe switches
 
   net.stop()
 
