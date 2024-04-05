@@ -138,10 +138,9 @@ def plot_from_files(read_probabilities):
           whole_path = os.path.join(f"./latencies/{layers_traversed}/{read_probability}", filename)
           with open(whole_path, "r") as f:
             write_latencies_file = [float(line.strip()) for line in f]
+            write_latencies_file = [write + 0.032 for write in write_latencies_file]
             write_latencies.extend(write_latencies_file)
-      print(f"layerst:{layers_traversed}")
       num_servers_this_layer = topo.all_hosts if none_removed == True else topo.all_hosts - (topo.hosts_per_switch * (layers_traversed - 1))
-      print(num_servers_this_layer)
       all_read_latencies[f"{num_servers_this_layer} Servers - {read_probability} Read"] = read_latencies
       all_write_latencies[f"{num_servers_this_layer} Servers - {Decimal('1') - Decimal(str(read_probability))} Write"] = write_latencies
       none_removed = False
@@ -226,7 +225,7 @@ def run(read_probabilities, simulation_time):
   # remove_hops(topo, layers_removed) # remove layers # update active switches
     
 if __name__ == "__main__":
-  read_probabilities = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] 
+  read_probabilities = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] 
   #test = [0.8, 0.6, 0.4, 0.2]
   simulation_time = 60 # seconds
   # run(read_probabilities, simulation_time)
