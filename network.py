@@ -1,12 +1,10 @@
 from decimal import Decimal
 import numpy as np
-import math
 from mininet.net import Mininet
 from mininet.net import Mininet
 from mininet.node import OVSSwitch
 from mininet.link import TCLink
 from mininet.log import setLogLevel
-from mininet.cli import CLI
 import time
 import multiprocessing as mp
 from topology import DynamicTopology
@@ -63,7 +61,7 @@ def add_hops(topo, net, layer_removed):
   net.waitConnected()
 
 def plot_graphs(all_read_latencies, all_write_latencies):
-  print(all_write_latencies)
+  # print(all_read_latencies)
   plt.figure(figsize=(10, 6))
 
   read_probabilities = {}
@@ -74,18 +72,17 @@ def plot_graphs(all_read_latencies, all_write_latencies):
     if read_probability not in read_probabilities:
       read_probabilities[read_probability] = {'num_servers': [], 'average_latencies': []}
     read_probabilities[read_probability]['num_servers'].append(num_servers)
-    read_probabilities[read_probability]['average_latencies'].append(np.mean(latencies))
+    read_probabilities[read_probability]['average_latencies'].append(np.mean(latencies) * 1000)
 
   # Plot average latencies for each read probability
   for read_probability, data in read_probabilities.items():
-    plt.plot(data['num_servers'], data['average_latencies'], marker='o', label=f'Read Probability: {read_probability}')
+    plt.plot(data['num_servers'], data['average_latencies'], marker='o', label=f'Read Fraction: {read_probability}')
 
   plt.xlabel('Number of Servers')
-  plt.ylabel('Average Read Response Time')
-  plt.title('Average Read Response Time vs. Number of Servers')
+  plt.ylabel('Average Read Response Time [ms]')
   plt.legend()
   plt.grid(True)
-  plt.savefig('read_response_time.png')
+  plt.savefig('read_response_time_2.pdf')
 
   ## writes
   plt.figure(figsize=(10, 6))
@@ -98,18 +95,17 @@ def plot_graphs(all_read_latencies, all_write_latencies):
     if write_probability not in write_probabilities:
       write_probabilities[write_probability] = {'num_servers': [], 'average_latencies': []}
     write_probabilities[write_probability]['num_servers'].append(num_servers)
-    write_probabilities[write_probability]['average_latencies'].append(np.mean(latencies))
+    write_probabilities[write_probability]['average_latencies'].append(np.mean(latencies) * 1000)
 
   # Plot average latencies for each read probability
   for write_probability, data in write_probabilities.items():
-    plt.plot(data['num_servers'], data['average_latencies'], marker='o', label=f'Write Probability: {write_probability}')
+    plt.plot(data['num_servers'], data['average_latencies'], marker='o', label=f'Write Fraction: {write_probability}')
 
   plt.xlabel('Number of Servers')
-  plt.ylabel('Average Write Response Time (seconds)')
-  plt.title('Average Write Response Time vs. Number of Servers')
+  plt.ylabel('Average Write Response Time [ms]')
   plt.legend()
   plt.grid(True)
-  plt.savefig('write_response_time.png')
+  plt.savefig('write_response_time_2.pdf')
 
 def make_latency_dirs(num_switch_layers, read_probabilities):
   os.mkdir(f'./latencies')
@@ -118,6 +114,40 @@ def make_latency_dirs(num_switch_layers, read_probabilities):
     for read_probability in read_probabilities:
       # make dir for this read_prob run
       os.mkdir(f'./latencies/{layer}/{read_probability}')
+
+def plot_from_files(read_probabilities):
+  topo = DynamicTopology()
+  topo.create_network()
+
+  all_read_latencies = {}
+  all_write_latencies = {}
+  none_removed = True
+
+  for layers_traversed in range(1, topo.num_switch_layers + 1):
+    for read_probability in read_probabilities:
+      read_latencies = []
+      write_latencies = []
+
+      for filename in os.listdir(f"./latencies/{layers_traversed}/{read_probability}"):
+        if filename.startswith("read"):
+          whole_path = os.path.join(f"./latencies/{layers_traversed}/{read_probability}", filename)
+          with open(whole_path, "r") as f:
+            read_latencies_file = [float(line.strip()) for line in f]
+            read_latencies.extend(read_latencies_file)
+        elif filename.startswith("write"):
+          whole_path = os.path.join(f"./latencies/{layers_traversed}/{read_probability}", filename)
+          with open(whole_path, "r") as f:
+            write_latencies_file = [float(line.strip()) for line in f]
+            write_latencies.extend(write_latencies_file)
+      print(f"layerst:{layers_traversed}")
+      num_servers_this_layer = topo.all_hosts if none_removed == True else topo.all_hosts - (topo.hosts_per_switch * (layers_traversed - 1))
+      print(num_servers_this_layer)
+      all_read_latencies[f"{num_servers_this_layer} Servers - {read_probability} Read"] = read_latencies
+      all_write_latencies[f"{num_servers_this_layer} Servers - {Decimal('1') - Decimal(str(read_probability))} Write"] = write_latencies
+      none_removed = False
+
+  plot_graphs(all_read_latencies, all_write_latencies)
+
 
 def run(read_probabilities, simulation_time):
   setLogLevel("debug")
@@ -186,17 +216,18 @@ def run(read_probabilities, simulation_time):
 
   plot_graphs(all_read_latencies, all_write_latencies)
     
-  bw = random.uniform(0.1, 10)  # random bandwidth between 1 and 10 Mbps
-  set_bandwidth(net, bw)
-  pl = random.randint(0, 20) # pkt loss percentage
-  set_packet_loss(net, pl) 
-  dt = random.randint(0, 10) # delay time 1 - 10ms
-  set_packet_delay(net, dt)
-  layers_removed = random.randint(2, len(net.switches))
-  remove_hops(topo, layers_removed) # remove layers # update active switches
+  # bw = random.uniform(0.1, 10)  # random bandwidth between 1 and 10 Mbps
+  # set_bandwidth(net, bw)
+  # pl = random.randint(0, 20) # pkt loss percentage
+  # set_packet_loss(net, pl) 
+  # dt = random.randint(0, 10) # delay time 1 - 10ms
+  # set_packet_delay(net, dt)
+  # layers_removed = random.randint(2, len(net.switches))
+  # remove_hops(topo, layers_removed) # remove layers # update active switches
     
 if __name__ == "__main__":
-  read_probabilities = [0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] 
+  read_probabilities = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] 
   #test = [0.8, 0.6, 0.4, 0.2]
   simulation_time = 60 # seconds
-  run(read_probabilities, simulation_time)
+  # run(read_probabilities, simulation_time)
+  plot_from_files(read_probabilities)
