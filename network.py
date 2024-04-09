@@ -6,6 +6,7 @@ from mininet.node import OVSSwitch
 from mininet.link import TCLink
 from mininet.log import setLogLevel
 import time
+from mininet.cli import CLI
 import multiprocessing as mp
 from topology import DynamicTopology
 import matplotlib.pyplot as plt
@@ -17,18 +18,24 @@ CHANNEL = "cache_updates"
 
 def configure_cache(net):
   for host in net.hosts:
-    host.cmd("echo 'maxmemory 1024' >> /etc/redis/redis.conf")  # Set cache size limit
+    host.cmd("echo 'maxmemory 10240' >> /etc/redis/redis.conf")  # Set cache size limit
     host.cmd("echo 'protected-mode no' >> /etc/redis/redis.conf")  # Set cache size limit
+    host.cmd("echo 'tcp-keepalive yes' >> /etc/redis/redis.conf")
     host.cmd("redis-server --daemonize yes")
     host.cmd("redis-cli CONFIG SET protected-mode no")
+    host.cmd("redis-cli CONFIG SET tcp-keepalive 1")
 
   # get manager node
   home = net.get('home')
   print(f"Home node IP: {home.IP()}")
-  home.cmd("echo 'appendonly yes' >> /etc/redis/redis.conf")  # Enable append-only mode
+  home.cmd("echo 'maxmemory 10240' >> /etc/redis/redis.conf")  # Set cache size limit
+  home.cmd("echo 'appendonly no' >> /etc/redis/redis.conf")  # Enable append-only mode
+  home.cmd("echo 'tcp-keepalive yes' >> /etc/redis/redis.conf")
   home.cmd("echo 'protected-mode no' >> /etc/redis/redis.conf")  # Set cache size limit
   home.cmd("redis-server --daemonize yes")
   home.cmd("redis-cli CONFIG SET protected-mode no")
+  home.cmd("redis-cli CONFIG SET tcp-keepalive 1")
+  home.cmd("redis-cli CONFIG SET proto-max-bulk-len 8000")
 
 def set_bandwidth(net, bw):
   print(f"Setting bandwidth to {bw} Mbps")
@@ -52,7 +59,8 @@ def remove_hops(topo, net, layer_removed):
   print(f"switch_name:{switch_name}")
   switch = net.get(switch_name)
   switch.stop()
-  return int(switch_name[1])
+  print(int(switch_name[1:]))
+  return int(switch_name[1:])
 
 def add_hops(topo, net, layer_removed):
   switch_name = topo.all_switches[topo.num_switch_layers - layer_removed]  # remove lowest layers -> upper layers
@@ -61,7 +69,6 @@ def add_hops(topo, net, layer_removed):
   net.waitConnected()
 
 def plot_graphs(all_read_latencies, all_write_latencies):
-  # print(all_read_latencies)
   plt.figure(figsize=(10, 6))
 
   read_probabilities = {}
@@ -81,8 +88,11 @@ def plot_graphs(all_read_latencies, all_write_latencies):
   plt.xlabel('Number of Servers')
   plt.ylabel('Average Read Response Time [ms]')
   plt.legend()
+  new_xticks = [x for x in plt.xticks()[0] if (x >= plt.xlim()[0] and x <= plt.xlim()[1])]
+  new_xticks.append(10)
+  plt.xticks(new_xticks)
   plt.grid(True)
-  plt.savefig('read_response_time_2.pdf')
+  plt.savefig('read_response_time_baseline.pdf')
 
   ## writes
   plt.figure(figsize=(10, 6))
@@ -105,15 +115,19 @@ def plot_graphs(all_read_latencies, all_write_latencies):
   plt.ylabel('Average Write Response Time [ms]')
   plt.legend()
   plt.grid(True)
-  plt.savefig('write_response_time_2.pdf')
+  plt.ylim(ymin=0)
+  new_xticks = [x for x in plt.xticks()[0] if (x >= plt.xlim()[0] and x <= plt.xlim()[1])]
+  new_xticks.append(10)
+  plt.xticks(new_xticks)
+  plt.savefig('write_response_time_baseline.pdf')
 
 def make_latency_dirs(num_switch_layers, read_probabilities):
-  os.mkdir(f'./latencies')
+  os.mkdir(f'./latencies2')
   for layer in range(1, num_switch_layers + 1):
-    os.mkdir(f'./latencies/{layer}')
+    os.mkdir(f'./latencies2/{layer}')
     for read_probability in read_probabilities:
       # make dir for this read_prob run
-      os.mkdir(f'./latencies/{layer}/{read_probability}')
+      os.mkdir(f'./latencies2/{layer}/{read_probability}')
 
 def plot_from_files(read_probabilities):
   topo = DynamicTopology()
@@ -128,23 +142,24 @@ def plot_from_files(read_probabilities):
       read_latencies = []
       write_latencies = []
 
-      for filename in os.listdir(f"./latencies/{layers_traversed}/{read_probability}"):
+      for filename in os.listdir(f"./latencies2/{layers_traversed}/{read_probability}"):
         if filename.startswith("read"):
-          whole_path = os.path.join(f"./latencies/{layers_traversed}/{read_probability}", filename)
+          whole_path = os.path.join(f"./latencies2/{layers_traversed}/{read_probability}", filename)
           with open(whole_path, "r") as f:
             read_latencies_file = [float(line.strip()) for line in f]
             read_latencies.extend(read_latencies_file)
         elif filename.startswith("write"):
-          whole_path = os.path.join(f"./latencies/{layers_traversed}/{read_probability}", filename)
+          whole_path = os.path.join(f"./latencies2/{layers_traversed}/{read_probability}", filename)
           with open(whole_path, "r") as f:
             write_latencies_file = [float(line.strip()) for line in f]
             write_latencies_file = [write + 0.032 for write in write_latencies_file]
             write_latencies.extend(write_latencies_file)
       num_servers_this_layer = topo.all_hosts if none_removed == True else topo.all_hosts - (topo.hosts_per_switch * (layers_traversed - 1))
       all_read_latencies[f"{num_servers_this_layer} Servers - {read_probability} Read"] = read_latencies
-      all_write_latencies[f"{num_servers_this_layer} Servers - {Decimal('1') - Decimal(str(read_probability))} Write"] = write_latencies
+      if (read_probability != 1.0):
+        all_write_latencies[f"{num_servers_this_layer} Servers - {Decimal('1') - Decimal(str(read_probability))} Write"] = write_latencies
       none_removed = False
-
+  
   plot_graphs(all_read_latencies, all_write_latencies)
 
 
@@ -162,6 +177,7 @@ def run(read_probabilities, simulation_time):
   net.start()
   configure_cache(net)
   make_latency_dirs(topo.num_switch_layers, read_probabilities)
+  # CLI(net)
 
   curr_layer_removed = 0
   layers_removed = 0
@@ -174,14 +190,21 @@ def run(read_probabilities, simulation_time):
         if host.name != 'home':
           num_hosts_this_layer = (topo.all_hosts - (layers_removed * topo.hosts_per_switch))
           print(num_hosts_this_layer)
-          if curr_layer_removed and int(host.name[1]) < curr_layer_removed or curr_layer_removed == 0:
+          split = host.name.split('_')
+          if curr_layer_removed and int(split[0][1:]) < curr_layer_removed or curr_layer_removed == 0:
             is_last_node = (i == num_hosts_this_layer) 
             cmd = f"python3 cache_app.py {host.name} {read_probability} {layers_traversed} {is_last_node} {simulation_time}"
             process = mp.Process(target=host.cmd, args=(cmd,))
             processes.append(process)
+        # else:
+        #   cmd = f"python3 manager_app.py"
+        #   process = mp.Process(target=host.cmd, args=(cmd,))
+        #   process.start()
 
       # Start all node processes
       for process in processes:
+        if (layers_traversed in [x for x in range(1, 8)]):
+          time.sleep(0.3)
         process.start()
         
       while any(process.is_alive() for process in processes): # wait until all are dead
@@ -190,43 +213,48 @@ def run(read_probabilities, simulation_time):
       read_latencies = []
       write_latencies = []
 
-      for filename in os.listdir(f"./latencies/{layers_traversed}/{read_probability}"):
+      for filename in os.listdir(f"./latencies2/{layers_traversed}/{read_probability}"):
         if filename.startswith("read"):
-          whole_path = os.path.join(f"./latencies/{layers_traversed}/{read_probability}", filename)
+          whole_path = os.path.join(f"./latencies2/{layers_traversed}/{read_probability}", filename)
           with open(whole_path, "r") as f:
             read_latencies_file = [float(line.strip()) for line in f]
             read_latencies.extend(read_latencies_file)
         elif filename.startswith("write"):
-          whole_path = os.path.join(f"./latencies/{layers_traversed}/{read_probability}", filename)
+          whole_path = os.path.join(f"./latencies2/{layers_traversed}/{read_probability}", filename)
           with open(whole_path, "r") as f:
             write_latencies_file = [float(line.strip()) for line in f]
             write_latencies.extend(write_latencies_file)
         
-      num_servers_this_layer = topo.all_hosts if curr_layer_removed == 0 else topo.all_hosts - (topo.hosts_per_switch * layers_traversed)
+      num_servers_this_layer = topo.all_hosts if curr_layer_removed == 0 else topo.all_hosts - (topo.hosts_per_switch * (layers_traversed - 1))
 
       all_read_latencies[f"{num_servers_this_layer} Servers - {read_probability} Read"] = read_latencies
-      all_write_latencies[f"{num_servers_this_layer} Servers - {Decimal('1') - Decimal(str(read_probability))} Write"] = write_latencies
+      if (read_probability != 1.0):
+        all_write_latencies[f"{num_servers_this_layer} Servers - {Decimal('1') - Decimal(str(read_probability))} Write"] = write_latencies
 
-    print(f"finished {topo.num_switch_layers - layers_traversed} layer execution")
+    print(f"finished {topo.num_switch_layers - layers_traversed}th layer execution")
     # Remove nodes by layer (bottom up)
     if topo.num_switch_layers - layers_traversed != 0:
       curr_layer_removed = remove_hops(topo, net, layers_traversed)
     layers_removed += 1
+  
+  for read in read_probabilities:
+    all_read_latencies[f"0 Servers - {read} Read"] = [0]
+    all_write_latencies[f"0 Servers - {Decimal('1') - Decimal(str(read))} Write"] = [0]
 
   plot_graphs(all_read_latencies, all_write_latencies)
     
-  # bw = random.uniform(0.1, 10)  # random bandwidth between 1 and 10 Mbps
-  # set_bandwidth(net, bw)
-  # pl = random.randint(0, 20) # pkt loss percentage
-  # set_packet_loss(net, pl) 
-  # dt = random.randint(0, 10) # delay time 1 - 10ms
-  # set_packet_delay(net, dt)
-  # layers_removed = random.randint(2, len(net.switches))
-  # remove_hops(topo, layers_removed) # remove layers # update active switches
+  bw = random.uniform(0.1, 10)  # random bandwidth between 1 and 10 Mbps
+  set_bandwidth(net, bw)
+  pl = random.randint(0, 20) # pkt loss percentage
+  set_packet_loss(net, pl) 
+  dt = random.randint(0, 10) # delay time 1 - 10ms
+  set_packet_delay(net, dt)
+  layers_removed = random.randint(2, len(net.switches))
+  remove_hops(topo, layers_removed) # remove layers # update active switches
     
 if __name__ == "__main__":
-  read_probabilities = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] 
-  #test = [0.8, 0.6, 0.4, 0.2]
+  read_probabilities = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] 
+  # test = [0.8, 0.2]
   simulation_time = 60 # seconds
-  # run(read_probabilities, simulation_time)
+  #run(read_probabilities, simulation_time)
   plot_from_files(read_probabilities)
